@@ -1,0 +1,184 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: wpvidalinux
+  labels:
+    apps: wpvidalinux-app
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: wpvidalinux-app
+  name: wpvidalinux-app
+  namespace: wpvidalinux
+spec:
+  selector:
+    app: wpvidalinux-app
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: wpvidalinux-db
+  name: wpvidalinux-db
+  namespace: wpvidalinux
+spec:
+  selector:
+    app: wpvidalinux-db
+  ports:
+  - name: "3306"
+    port: 3306
+    targetPort: 3306
+  clusterIP: None
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: wpvidalinux-pv
+  namespace: wpvidalinux
+  labels:
+    type: local
+spec:
+  storageClassName: manual
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: "/var/export/kube/wpvidalinux/app"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: wpvidalinux-pvc
+  namespace: wpvidalinux
+spec:
+  storageClassName: manual
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+kind: Pod
+apiVersion: v1
+metadata:
+  name: wpvidalinux-app
+  namespace: wpvidalinux
+  labels:
+    app: wpvidalinux-app
+spec:
+  volumes:
+    - name: wpvidalinux-pv
+      persistentVolumeClaim:
+        claimName: wpvidalinux-pvc
+  containers:
+    - name: wpvidalinux-app
+      image: docker.io/library/wordpress:6.2.2-php8.1-apache
+      env:
+        - name: WORDPRESS_DB_NAME
+          value: "wordpressdb"
+        - name: WORDPRESS_DB_USER
+          value: "wordpress"
+        - name: WORDPRESS_DB_PASSWORD
+          value: "wordpress"
+        - name: WORDPRESS_DB_HOST
+          value: "wpvidalinux-db"
+        - name: TZ
+          value: "America/Puerto_Rico"
+      volumeMounts:
+        - mountPath: "/var/www/html"
+          name: wpvidalinux-pv
+      ports:
+        - containerPort: 80
+          name: wpvidalinux-app
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: wpvidalinux-db-pv
+  namespace: wpvidalinux
+  labels:
+    type: local
+spec:
+  storageClassName: manual
+  capacity:
+    storage: 5Gi
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: "/var/export/kube/wpvidalinux/db"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: wpvidalinux-db-pvc
+  namespace: wpvidalinux
+spec:
+  storageClassName: manual
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+kind: Pod
+apiVersion: v1
+metadata:
+  name: wpvidalinux-db
+  namespace: wpvidalinux
+  labels:
+    app: wpvidalinux-db
+spec:
+  volumes:
+    - name: wpvidalinux-db-nfs
+      persistentVolumeClaim:
+        claimName: wpvidalinux-db-pvc
+  containers:
+    - name: wpvidalinux-db
+      image: docker.io/library/mariadb:10.7.7
+      env:
+        - name: MYSQL_DATABASE
+          value: wordpressdb
+        - name: MYSQL_ROOT_PASSWORD
+          value: root
+        - name: MYSQL_USER
+          value: wordpress
+        - name: MYSQL_PASSWORD
+          value: wordpress
+        - name: TZ
+          value: "America/Puerto_Rico"
+      volumeMounts:
+        - mountPath: /var/lib/mysql
+          name: wpvidalinux-db-nfs
+      ports:
+        - containerPort: 3306
+          name: wpvidalinux-db
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: wpvidalinux
+  namespace: wpvidalinux
+spec:
+  ingressClassName: "nginx"
+  tls:
+    - hosts:
+      - portal.ovoxcloud.com
+      secretName: ovoxcloud.com-tls
+  rules:
+    - host: portal.ovoxcloud.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: wpvidalinux-app
+                port:
+                  number: 80

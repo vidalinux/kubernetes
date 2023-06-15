@@ -1,0 +1,51 @@
+#!/bin/bash
+
+
+APVOL=/var/export/kube/wpvidalinux/app
+DBVOL=/var/export/kube/wpvidalinux/db
+DATE=$(date +%F)
+ROOT_USER=root
+ROOT_PASS=""
+DBUSER=""
+DBNAME=""
+DBPASS=""
+APPNAME=""
+BKDIR=/root/kubernetes/wordpress/backup
+SQLBK=${APPNAME}-${DATE}.sql
+NSPACE=wpvidalinux
+CONAME=$(kubectl get pods -n ${NSPACE} |grep db|awk '{print $1}')
+DBHOST=$(kubectl describe pod ${CONAME} -n ${NSPACE}|grep IP|tail -n1|awk '{print $2}')
+
+if [ $1 = createdb ];
+then
+echo "creating database"
+kubectl exec -it ${CONAME} -n ${NSPACE} -- mysql -u${ROOT_USER} -p${ROOT_PASS} -e "CREATE DATABASE ${DBNAME};"
+kubectl exec -it ${CONAME} -n ${NSPACE} -- mysql -u${ROOT_USER} -p${ROOT_PASS} -e "GRANT ALL PRIVILEGES ON ${DBNAME}.* TO '${DBUSER}'@'localhost' IDENTIFIED BY '${DBPASS}';"
+kubectl exec -it ${CONAME} -n ${NSPACE} -- mysql -u${ROOT_USER} -p${ROOT_PASS} -e "GRANT ALL PRIVILEGES ON ${DBNAME}.* TO '${DBUSER}'@'%' IDENTIFIED BY '${DBPASS}';"
+fi
+
+if [ $1 = importdb ];
+then
+echo "importing backup to database"
+kubectl exec -i ${CONAME} -n ${NSPACE} -- mysql -u${ROOT_USER} -p${ROOT_PASS} ${DBNAME} < ${BKDIR}/${SQLBK}
+fi
+
+if [ $1 = download ];
+then
+wget -c http://wordpress.org/latest.tar.gz -O /tmp/wordpress.tar.gz && \
+tar -xvzf /tmp/wordpress.tar.gz -C ${APVOL}/ && \
+cd ${APVOL}/wordpress && mv * ../ && cd ../ && rm -rf wordpress/
+fi
+
+if [ $1 = backupdb ];
+then
+echo "backup database $DBNAME"
+kubectl exec -i ${CONAME} -n ${NSPACE} -- mysqldump -u${DBUSER} -p${DBPASS} ${DBNAME} > ${BKDIR}/${SQLBK}
+echo "compress wordpress static dir"
+APPDIR=/static/kube/wordpress/vidalinux
+BKNAME=${APPNAME}-$DATE
+BKDIR=/root/kubernetes/wordpress/backup
+cd ${APPDIR} && cp -rfp app ${BKDIR}/app-${DATE} && \
+cd ${BKDIR} && tar fczP ${BKNAME}.tar.xz app-${DATE} ${SQLBK} && \
+rm -rf ${BKDIR}/app-${DATE} 
+fi
