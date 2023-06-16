@@ -1,0 +1,245 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: seafile-app
+  labels:
+    apps: seafile
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: seafile-db-pv 
+  labels:
+    type: local
+spec:
+  storageClassName: manual
+  capacity:
+    storage: 5Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: "/var/export/kube/seafile/db"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: seafile-db-pvc 
+  namespace: seafile-app
+spec:
+  storageClassName: manual
+  accessModes:
+    - ReadWriteOnce 
+  resources:
+    requests:
+      storage: 5Gi 
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: seafile-db
+  name: seafile-db
+  namespace: seafile-app
+spec:
+  selector:
+    matchLabels:
+      app: seafile-db
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: seafile-db
+    spec:
+      containers:
+      - env:
+        - name: MYSQL_LOG_CONSOLE
+          value: "true"
+        - name: MYSQL_ROOT_PASSWORD
+          value: "livinglavidalinux"
+        - name: TZ
+          value: "America/Puerto_Rico"
+        image: mariadb:10.1
+        name: seafile-mysql
+        volumeMounts:
+        - mountPath: /var/lib/mysql
+          name: seafile-db-nfs
+      restartPolicy: Always
+      volumes:
+      - name: seafile-db-nfs
+        persistentVolumeClaim:
+          claimName: seafile-db-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: seafile-db
+  name: seafile-db
+  namespace: seafile-app
+spec:
+  selector:
+    app: seafile-db
+  ports:
+  - name: "3306"
+    port: 3306
+    targetPort: 3306
+  clusterIP: None    
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: seafile-mc
+  name: seafile-mc
+  namespace: seafile-app
+spec:
+  selector:
+    matchLabels:
+      app: seafile-mc
+  template:
+    metadata:
+      labels:
+        app: seafile-mc
+    spec:
+      containers:
+      - command:
+        - memcached
+        - -m
+        - "256"
+        image: memcached:1.5.6
+        name: seafile-memcached
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: seafile-mc
+  name: seafile-mc
+  namespace: seafile-app
+spec:
+  selector:
+    app: seafile-mc
+  ports:
+  - name: "11211"
+    port: 11211
+    targetPort: 11211
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: seafile-srv-pv 
+  labels:
+    type: local
+spec:
+  storageClassName: manual
+  capacity:
+    storage: 190Gi
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: "/var/export/kube/seafile/app"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: seafile-srv-pvc
+  namespace: seafile-app
+spec:
+  storageClassName: manual
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: seafile-srv
+  name: seafile-srv
+  namespace: seafile-app
+spec:
+  selector:
+    matchLabels:
+      app: seafile-srv
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: seafile-srv
+    spec:
+      containers:
+      - env:
+        - name: DB_HOST
+          value: "seafile-db"
+        - name: DB_ROOT_PASSWD
+          value: "livinglavidalinux"
+        - name: SEAFILE_ADMIN_EMAIL
+          value: "junior@ovoxcloud.com"
+        - name: SEAFILE_ADMIN_PASSWORD
+          value: "livinglavidalinux"
+        - name: SEAFILE_SERVER_HOSTNAME
+          value: "seafile.ovoxcloud.com"
+        - name: SEAFILE_SERVER_LETSENCRYPT
+          value: "true"
+        - name: TZ
+          value: "America/Puerto_Rico"
+        image: seafileltd/seafile-mc:latest
+        name: seafile
+        ports:
+        - containerPort: 443
+        volumeMounts:
+        - mountPath: /shared
+          name: seafile-srv-nfs
+      restartPolicy: Always
+      volumes:
+      - name: seafile-srv-nfs
+        persistentVolumeClaim:
+          claimName: seafile-srv-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: seafile-srv
+  name: seafile-srv
+  namespace: seafile-app
+spec:
+  selector:
+    app: seafile-srv
+  ports:
+  - name: "443"
+    port: 443
+    targetPort: 443
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: seafile-srv
+  namespace: seafile-app
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-passthrough: "true"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+    ingress.kubernetes.io/proxy-body-size: 50m
+    nginx.org/client-max-body-size: "100m"
+spec:
+  ingressClassName: "nginx"
+  tls:
+    - hosts:
+      - seafile.ovoxcloud.com
+  rules:
+    - host: seafile.ovoxcloud.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: seafile-srv
+                port:
+                  number: 443
