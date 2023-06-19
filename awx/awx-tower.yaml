@@ -1,0 +1,13 @@
+apiVersion: awx.ansible.com/v1beta1
+kind: AWX
+metadata:
+  name: awx-tower
+  namespace: awx
+spec:
+  service_type: nodeport
+  hostname: awx.ovoxcloud.com
+  projects_persistence: true
+  projects_storage_class: rook-cephfs
+  projects_storage_size: 5Gi
+  postgres_storage_class: rook-ceph-block
+  ingress_type: none
